@@ -4,6 +4,7 @@ import (
 	"github.com/gophercloud/gophercloud"
 	"github.com/gophercloud/gophercloud/pagination"
 
+	"reflect"
 )
 
 // ListOpts allows the filtering and sorting of paginated collections through
@@ -13,16 +14,36 @@ import (
 // either `asc' or `desc'. Marker and Limit are used for pagination.
 
 type ListOpts struct {
-	// ID is the unique identifier for the vpc.
+	// ID is the unique identifier for the subnet.
+	ID string `json:"id"`
+
+	// Name is the human readable name for the subnet. It does not have to be
+	// unique.
+	Name string `json:"name"`
+
+	//Specifies the network segment on which the subnet resides.
+	CIDR string `json:"cidr"`
+
+	// Status indicates whether or not a subnet is currently operational.
+	Status string `json:"status"`
+
+	//Specifies the gateway of the subnet.
+	GatewayIP string `json:"gateway_ip"`
+
+	//Specifies whether the DHCP function is enabled for the subnet.
+	EnableDHCP bool `json:"dhcp_enable"`
+
+	//Specifies the IP address of DNS server 1 on the subnet.
+	PRIMARY_DNS string `json:"primary_dns"`
+
+	//Specifies the IP address of DNS server 2 on the subnet.
+	SECONDARY_DNS string `json:"secondary_dns"`
+
+	//Identifies the availability zone (AZ) to which the subnet belongs.
+	AvailabilityZone string `json:"availability_zone"`
+
+	//Specifies the ID of the VPC to which the subnet belongs.
 	VPC_ID string `json:"vpc_id"`
-
-	//Specifies the number of records returned on each page.
-	//The value ranges from 0 to intmax.
-	Limit        int    `q:"limit"`
-
-	//Specifies the resource ID of pagination query.
-	//If the parameter is left blank, only resources on the first page are queried.
-	Marker       string `q:"marker"`
 }
 
 // List returns collection of
@@ -31,15 +52,83 @@ type ListOpts struct {
 //
 // Default policy settings return only those subnets that are owned by the
 // tenant who submits the request, unless an admin user submits the request.
-func List(c *gophercloud.ServiceClient, opts ListOpts) pagination.Pager {
-	q, err := gophercloud.BuildQueryString(&opts)
-	if err != nil {
-		return pagination.Pager{Err: err}
-	}
-	u := rootURL(c) + q.String()
-	return pagination.NewPager(c, u, func(r pagination.PageResult) pagination.Page {
+
+
+func List(c *gophercloud.ServiceClient, opts ListOpts) ([]Subnet, error) {
+	u := rootURL(c)
+	pages, err := pagination.NewPager(c, u, func(r pagination.PageResult) pagination.Page {
 		return SubnetPage{pagination.LinkedPageBase{PageResult: r}}
-	})
+	}).AllPages()
+
+	allSubnets, err := ExtractSubnets(pages)
+	if err != nil {
+		return nil, err
+	}
+
+	return FilterSubnets(allSubnets, opts)
+}
+
+func FilterSubnets(subnets []Subnet, opts ListOpts) ([]Subnet, error) {
+
+	var refinedSubnets []Subnet
+	var matched bool
+	m := map[string]interface{}{}
+
+	if opts.ID != "" {
+		m["ID"] = opts.ID
+	}
+	if opts.Name != "" {
+		m["Name"] = opts.Name
+	}
+	if opts.CIDR != "" {
+		m["CIDR"] = opts.CIDR
+	}
+	if opts.Status != "" {
+		m["Status"] = opts.Status
+	}
+	if opts.GatewayIP != "" {
+		m["GatewayIP"] = opts.GatewayIP
+	}
+	if opts.PRIMARY_DNS != "" {
+		m["PRIMARY_DNS"] = opts.PRIMARY_DNS
+	}
+	if opts.SECONDARY_DNS != "" {
+		m["SECONDARY_DNS"] = opts.SECONDARY_DNS
+	}
+	if opts.AvailabilityZone != "" {
+		m["AvailabilityZone"] = opts.AvailabilityZone
+	}
+	if opts.VPC_ID != "" {
+		m["VPC_ID"] = opts.VPC_ID
+	}
+
+
+	if len(m) > 0 && len(subnets) > 0 {
+		for _, subnet := range subnets {
+			matched = true
+
+			for key, value := range m {
+				if sVal := getStructField(&subnet, key); !(sVal == value) {
+					matched = false
+				}
+			}
+
+			if matched {
+				refinedSubnets = append(refinedSubnets, subnet)
+			}
+		}
+
+	} else {
+		refinedSubnets = subnets
+	}
+
+	return refinedSubnets, nil
+}
+
+func getStructField(v *Subnet, field string) string {
+	r := reflect.ValueOf(v)
+	f := reflect.Indirect(r).FieldByName(field)
+	return string(f.String())
 }
 
 // CreateOptsBuilder allows extensions to add additional parameters to the
@@ -54,7 +143,7 @@ type CreateOpts struct {
 	Name string `json:"name,omitempty"`
 	CIDR string `json:"cidr,omitempty"`
 	GatewayIP string `json:"gateway_ip,omitempty"`
-	EnableDHCP string `json:"dhcp_enable,omitempty"`
+	EnableDHCP bool `json:"dhcp_enable,omitempty"`
 	PRIMARY_DNS string `json:"primary_dns,omitempty"`
 	SECONDARY_DNS string `json:"secondary_dns,omitempty"`
 	AvailabilityZone string `json:"availability_zone,omitempty"`
